@@ -6,31 +6,75 @@
 namespace DcsBios {
 	class ExportStreamListener {
 		private:
-			virtual void onDcsBiosWrite(unsigned int address, unsigned int value) {}
-			virtual void onDcsBiosFrameSync() {}
-			ExportStreamListener* nextExportStreamListener;
+			uint16_t firstAddressOfInterest;
+			uint16_t lastAddressOfInterest;
 		public:
+			virtual void onDcsBiosWrite(unsigned int address, unsigned int value) {}
+			ExportStreamListener* nextExportStreamListener;
+			inline uint16_t getFirstAddressOfInterest() { return firstAddressOfInterest; }
+			inline uint16_t getLastAddressOfInterest() { return lastAddressOfInterest; }
+			
 			static ExportStreamListener* firstExportStreamListener;
-			ExportStreamListener() {
-				this->nextExportStreamListener = firstExportStreamListener;
-				firstExportStreamListener = this;
+			ExportStreamListener(uint16_t firstAddressOfInterest, uint16_t lastAddressOfInterest) {
+				this->firstAddressOfInterest = firstAddressOfInterest;
+				this->lastAddressOfInterest = lastAddressOfInterest;
+				
+				// nothing in the list? insert self as first element.
+				if (firstExportStreamListener == NULL) {
+					firstExportStreamListener = this;
+					nextExportStreamListener = NULL;
+					return;
+				}
+				
+				// insert into list of export stream listeners,
+				// keep list ordered ascending by lastAddressOfInterest
+				ExportStreamListener** prevNextPtr = &firstExportStreamListener;
+				ExportStreamListener* nextESL = firstExportStreamListener->nextExportStreamListener;
+				while (nextESL && nextESL->getLastAddressOfInterest() < lastAddressOfInterest) {
+					prevNextPtr = &(nextESL->nextExportStreamListener);
+					nextESL = nextESL->nextExportStreamListener;
+				}
+				this->nextExportStreamListener = nextESL;
+				*prevNextPtr = this;
+				
 			}
-			static void handleDcsBiosWrite(unsigned int address, unsigned int value) {
+			static void loopAll() {
 				ExportStreamListener* el = firstExportStreamListener;
 				while (el) {
-					el->onDcsBiosWrite(address, value);
+					el->loop();
 					el = el->nextExportStreamListener;
 				}
 			}
-			static void handleDcsBiosFrameSync() {
-				ExportStreamListener* el = firstExportStreamListener;
-				while (el) {
-					el->onDcsBiosFrameSync();
-					el = el->nextExportStreamListener;
-				}
-			}
+			virtual void loop() {};
 	};
 
+	class Int16Buffer : public ExportStreamListener {
+		private:
+			volatile unsigned int data;
+			volatile bool dirty;
+		public:
+			Int16Buffer(unsigned int address) : ExportStreamListener(address, address) {
+			
+			}
+			virtual void onDcsBiosWrite(unsigned int address, unsigned int data) {
+
+				this->data = data;
+				this->dirty = true;
+			
+			}
+			bool hasUpdatedData() { return dirty; }
+			unsigned int getData() {
+				uint16_t ret;
+				noInterrupts();
+				ret = data;
+				dirty = false;
+				interrupts();
+				
+				return ret;
+			}
+	};
+	
+	/* TODO
 	template < unsigned int LENGTH >
 	class StringBuffer : ExportStreamListener {
 		private:
@@ -96,7 +140,7 @@ namespace DcsBios {
 				dirty_ = false;
 			}
 	};
-	
+	*/
 }
 
 #endif
